@@ -1,0 +1,24 @@
+# Auto-provisions the Tempo datasource so Grafana is ready on first boot —
+# no clicking through the UI to add it. Mounted read-only into Grafana's
+# provisioning directory by docker-compose.
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200
+    isDefault: true
+    jsonData:
+      # Show service/node graph and search by default
+      tracesToLogsV2:
+        datasourceUid: ''
+      search:
+        hide: false
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      maxLines: 1000

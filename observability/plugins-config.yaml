@@ -1,0 +1,53 @@
+# plugins/config.yaml - Main plugin configuration file
+
+# Plugin directories to scan
+plugin_dirs:
+  - "plugins/native"      # Built-in plugins
+  - "plugins/custom"      # Custom organization plugins
+  - "/etc/mcpgateway/plugins"  # System-wide plugins
+
+# Global plugin settings
+plugin_settings:
+  parallel_execution_within_band: true
+  plugin_timeout: 120
+  fail_on_plugin_error: false
+  enable_plugin_api: true
+  plugin_health_check_interval: 120
+  include_user_info: false
+
+plugins:
+
+  - name: "PIIFilterPlugin"
+    kind: "plugins.pii_filter.pii_filter.PIIFilterPlugin"
+    hooks: ["tool_pre_invoke", "tool_post_invoke"]
+    mode: "enforce"               # actively masks PII (permissive would only flag)
+    priority: 50                  # LOWER number = runs BEFORE the exporter
+    config:
+      detect_ssn: true
+      detect_credit_card: true
+      detect_email: true
+      detect_phone: false
+      detect_ip_address: false  # Disabled for development
+      detect_aws_keys: true
+      detect_api_keys: true
+      # Masking Settings
+      default_mask_strategy: "partial"  # redact | partial | hash | tokenize | remove
+      redaction_text: "[PII_REDACTED]"
+      # Behavior Settings
+      block_on_detection: false  # Set to true for strict compliance
+      log_detections: true
+      include_detection_details: true
+      # Whitelist common test values
+      whitelist_patterns:
+        - "test@example.com"
+        - "555-555-5555"
+
+
+  - name: "ToolsTelemetryExporter"
+    kind: "plugins.tools_telemetry_exporter.telemetry_exporter.ToolsTelemetryExporterPlugin"
+    hooks: ["tool_pre_invoke", "tool_post_invoke"]
+    mode: "permissive"            # observe only
+    priority: 200                 # runs AFTER PIIFilter → captures masked payloads
+    config:
+      export_full_payload: true
+      max_payload_bytes_size: 10000

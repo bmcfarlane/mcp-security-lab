@@ -1,0 +1,250 @@
+# ============================================================================
+# MCP Integration Lab - Phase 1
+# ============================================================================
+# Architecture (all images ARM64-native or built locally on your M4):
+#
+#   Claude Desktop (macOS host)
+#        │  http://localhost:8080/mcp  (fileshare, via mitmproxy)
+#        │  http://localhost:8090/mcp  (CRM,       via mitmproxy)
+#        ▼
+#   ┌─ ai-dmz ──────────────────────────────────────────────┐
+#   │   mitmproxy  ── reverse-proxies ──►  mcp-filesystem   │
+#   │   (the ONLY service              └►  mcp-postgres ────┼──┐
+#   │    with published ports)                              │  │
+#   └───────────────────────────────────────────────────────┘  │
+#   ┌─ ai-internal (internal: true → NO egress, NO ingress) ─┐ │
+#   │   postgres  ◄──────────────────────────────────────────┼─┘
+#   └────────────────────────────────────────────────────────┘
+#
+# Security talking points baked into this file:
+#   1. ai-internal is `internal: true` — containers on it cannot reach the
+#      internet and nothing outside Docker can reach them. The CRM database
+#      has zero exposure. Prove it live:
+#        docker exec lab-postgres getent hosts google.com   # fails
+#   2. mitmproxy is the single ingress point — a deliberate preview of the
+#      MCP gateway pattern (one choke point for all AI tool traffic).
+#      The MCP servers publish NO ports of their own.
+#   3. mcp-postgres is dual-homed (dmz + internal), exactly like a
+#      firewall/proxy tier in a traditional DMZ design.
+#   4. The DB credential the MCP server holds is a SELECT-only role
+#      (created in seed/01-init.sql) — least privilege at the data tier,
+#      independent of anything the AI or MCP layer does.
+# ============================================================================
+
+name: mcp-lab
+
+networks:
+  ai-dmz:
+    driver: bridge
+  ai-internal:
+    driver: bridge
+    internal: true          # <-- the security boundary: no external routing
+
+services:
+
+  # --------------------------------------------------------------------------
+  # Mock business system #1: CRM database (internal network ONLY)
+  # --------------------------------------------------------------------------
+  postgres:
+    image: postgres:17        # official multi-arch image (arm64 native)
+    container_name: lab-postgres
+    environment:
+      POSTGRES_DB: crm
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: labadmin-not-for-prod
+    volumes:
+      - ./seed:/docker-entrypoint-initdb.d:ro    # auto-runs 01-init.sql on first start
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - ai-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d crm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --------------------------------------------------------------------------
+  # MCP server #1: CRM (custom FastMCP server, ~90 lines — see mcp-postgres/)
+  # Dual-homed: reachable from the dmz, can reach the database on internal.
+  # --------------------------------------------------------------------------
+  mcp-postgres:
+    build: ./mcp-postgres     # built locally => guaranteed arm64
+    container_name: lab-mcp-postgres
+    environment:
+      # Note: the MCP server only ever holds the READ-ONLY credential.
+      DATABASE_URL: postgresql://mcp_reader:readonly-lab@postgres:5432/crm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ai-dmz
+      - ai-internal
+    # No ports: section — deliberately unreachable except via mitmproxy.
+
+  # --------------------------------------------------------------------------
+  # Mock business system #2 + MCP server #2: the "file share"
+  # The official reference filesystem MCP server (stdio), wrapped by
+  # supergateway to expose it as Streamable HTTP. Data is a read-only
+  # bind mount of ./fileshare (generate it with scripts/make-fileshare.sh).
+  # --------------------------------------------------------------------------
+  mcp-filesystem:
+    build: ./mcp-filesystem   # built locally => guaranteed arm64
+    container_name: lab-mcp-filesystem
+    volumes:
+      - ./fileshare:/data:ro  # :ro = the AI physically cannot write/delete
+    networks:
+      - ai-dmz
+    # No ports: section — deliberately unreachable except via mitmproxy.
+
+
+# One-shot: make the gateway's data volume owned by the non-root app user (uid 1001)
+  # so its SQLite DB persists. Runs to completion before contextforge starts, then exits.
+  cfdata-init:
+    image: busybox:latest        # tiny, multi-arch (arm64-native)
+    command: sh -c "chown -R 1001:0 /data"
+    volumes:
+      - cfdata:/data
+    network_mode: "none"         # needs no network, just the volume
+    restart: "no"
+
+  # --------------------------------------------------------------------------
+  # PHASE 2: ContextForge MCP Gateway — the single governed endpoint.
+  # Built from PyPI => arm64-native. Sits on ai-dmz only: it reaches the MCP
+  # servers (via mitmproxy) but never touches the CRM database directly. Its
+  # own state lives in a SQLite volume, separate from the CRM Postgres.
+  #
+  # AUTH_REQUIRED=true is deliberate: the gateway rejects unauthenticated
+  # clients. That refusal is a demo, not an obstacle (see PHASE2.md).
+  # --------------------------------------------------------------------------
+  contextforge:
+    image: ghcr.io/ibm/mcp-context-forge:1.0.0-RC-2
+    container_name: lab-contextforge
+    depends_on:
+      cfdata-init:
+        condition: service_completed_successfully
+    environment:
+      HOST: 0.0.0.0
+      PORT: "4444"
+      DATABASE_URL: "sqlite:////data/mcp.db"
+      CACHE_TYPE: "none"
+      # This secret signs client bearer tokens. The create_jwt_token command
+      # in PHASE2.md MUST use this exact value (>=32 bytes).
+      JWT_SECRET_KEY: lab-jwt-secret-change-me-min-32-bytes-long
+      AUTH_REQUIRED: "true"
+      GUNICORN_WORKERS: "1"
+      DB_POOL_SIZE: "10"
+      SSRF_ALLOW_PRIVATE_NETWORKS: "true"
+      MCPGATEWAY_UI_ENABLED: "true"
+      MCPGATEWAY_ADMIN_API_ENABLED: "true"
+      PLATFORM_ADMIN_EMAIL: admin@lab.local
+      PLATFORM_ADMIN_PASSWORD: changeme
+      PLATFORM_ADMIN_FULL_NAME: "Lab Admin"
+      OTEL_ENABLE_OBSERVABILITY: "true"
+      OTEL_TRACES_EXPORTER: "otlp"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://tempo:4317"
+      OTEL_EXPORTER_OTLP_PROTOCOL: "grpc"
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_SERVICE_NAME: "contextforge-gateway"
+      SECURE_COOKIES: "false"   # required to log into the Admin UI over plain http
+      PLUGINS_ENABLED: "true"
+      PLUGINS_CONFIG_FILE: "/app/observability/plugins-config.yaml"
+      PLUGIN_CONFIG_FILE: "/app/observability/plugins-config.yaml"
+    volumes:
+      - cfdata:/data
+      - ./observability/plugins-config.yaml:/app/observability/plugins-config.yaml:ro
+    networks:
+      - ai-dmz
+    ports:
+      # Admin UI + token/registration API. Browser + curl only, so it does NOT
+      # go through mitmproxy. Loopback-bound.
+      - "127.0.0.1:4444:4444"
+
+  # --------------------------------------------------------------------------
+  # mitmproxy: now the inspection point for BOTH trust boundaries.
+  #   :8000 -> contextforge   (CLIENT  -> GATEWAY)
+  #   :8080 -> mcp-filesystem  (GATEWAY -> UPSTREAM)   <- gateway registers these
+  #   :8090 -> mcp-postgres    (GATEWAY -> UPSTREAM)   <- two as its upstreams
+  # One tool call now produces two flows in mitmweb. That's the lesson.
+  # --------------------------------------------------------------------------
+  mitmproxy:
+    image: mitmproxy/mitmproxy:latest   # publishes arm64 images
+    container_name: lab-mitmproxy
+    command: >
+      mitmweb
+      --mode reverse:http://contextforge:4444@8000
+      --mode reverse:http://mcp-filesystem:8000@8080
+      --mode reverse:http://mcp-postgres:8000@8090
+      --web-host 0.0.0.0
+      --web-port 8081
+      --set web_password=mcplab
+      --set keep_host_header=true
+    ports:
+      - "127.0.0.1:8000:8000"   # client -> gateway      (NEW: Claude Desktop hits this)
+      - "127.0.0.1:8080:8080"   # gateway -> filesystem   (also still curl-able directly)
+      - "127.0.0.1:8090:8090"   # gateway -> CRM
+      - "127.0.0.1:8081:8081"   # mitmweb UI -> http://localhost:8081 (pw: mcplab)
+    networks:
+      - ai-dmz
+    depends_on:
+      - contextforge
+      - mcp-filesystem
+      - mcp-postgres
+
+# Grafana Visualization
+
+  tempo:
+    image: grafana/tempo:latest      # mature/multi-arch (arm64 native). See pin note below.
+    container_name: lab-tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    user: "0"                        # lab simplification: avoids volume-permission fuss
+    volumes:
+      - ./observability/tempo.yaml:/etc/tempo.yaml:ro
+      - tempodata:/var/tempo
+    networks:
+      - ai-dmz
+
+  grafana:
+    image: grafana/grafana:latest    # mature/multi-arch (arm64 native)
+    container_name: lab-grafana
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"   # turnkey: no login for the lab
+    volumes:
+      - ./observability/grafana-datasource.yml:/etc/grafana/provisioning/datasources/tempo.yml:ro
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - ai-dmz
+    depends_on:
+      - tempo
+
+  loki:
+    image: grafana/loki:3.4.1
+    command: -config.file=/etc/loki/config.yaml
+    volumes:
+      - ./observability/loki-config.yaml:/etc/loki/config.yaml:ro
+      - loki_data:/loki
+    networks: [ai-dmz]
+    restart: unless-stopped
+
+  alloy:
+    image: grafana/alloy:latest
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+    volumes:
+      - ./observability/alloy-config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy/data
+    networks: [ai-dmz]
+    depends_on: [loki]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  cfdata:     # ContextForge's own SQLite state (registered gateways, virtual servers)
+  tempodata:
+  loki_data:
+  alloy_data:

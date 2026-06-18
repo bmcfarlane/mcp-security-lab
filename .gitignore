@@ -1,0 +1,36 @@
+# ── Secrets & real config (keep the .example, never the real thing) ──
+.env
+*.env
+!.env.example
+
+# Gateway config exports / backups (may contain registered servers, tokens)
+backups/
+*-config-*.json
+contextforge-config-*.json
+
+# ── Captured traffic (may contain payload data) ──
+*.flows
+*.har
+mitmproxy/dumps/
+captures/
+
+# ── Generated fixtures / local data ──\
+plugins-active.yaml          # only if you used the toggle-config approach
+
+# ── Logs ──
+*.log
+logs/
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# ── OS / editor junk ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
