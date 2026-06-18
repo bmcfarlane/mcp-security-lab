@@ -152,17 +152,17 @@ docker compose ps
 
 Once services are online, you'll need to login to the ContextForge Admin UI and create the configuration needed.
 
-1. Create MCP Servers for postgres and filesystem connections:
+1. Create MCP Servers for postgres and filesystem connections
 
 MCP Server Name: Database MCP
 MCP Server URL: http://mitmproxy:8090/mcp
 Transport Type: Streamable HTTP
---
+
 MCP Server Name: Fileserver MCP
 MCP Server URL: http://mitmproxy:8080/mcp
 Transport Type: Streamable HTTP
 
-2. Create Virtual Server(s) to associate to the MCP connections:
+2. Create Virtual Server(s) to associate to the MCP connections
 
 Name: Database-VS
 Tick Database MCP and select all Associated Tools
