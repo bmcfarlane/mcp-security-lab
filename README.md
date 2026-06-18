@@ -152,7 +152,7 @@ docker compose ps
 
 Once services are online, you'll need to login to the ContextForge Admin UI and create the configuration needed.
 
-1. Create MCP Servers for postgres and filesystem connections
+**1. Create MCP Servers for postgres and filesystem connections**
 
 MCP Server Name: Database MCP
 
@@ -171,7 +171,7 @@ MCP Server URL: http://mitmproxy:8080/mcp
 Transport Type: Streamable HTTP
 
 
-2. Create Virtual Server(s) to associate to the MCP connections
+**2. Create Virtual Server(s) to associate to the MCP connections**
 
 Name: Database-VS
 
@@ -191,13 +191,13 @@ Tick Fileserver MCP and select all Associated Tools
 
 Add Server
 
-(Take note of the 'server ID's [UUID])
+*(Take note of the 'server ID's [UUID])*
 
-3. Create API Token for admin user
+**3. Create API Token for admin user**
 
 API Tokens > set Token Name > Create Token
 
-(record token details as they are needed for auth in the next step)
+*(record token details as they are needed for auth in the next step)*
 
 4. Modify your Claude Desktop 'claude_desktop_config.json' file to include the created MCP connections like the below example:
 
