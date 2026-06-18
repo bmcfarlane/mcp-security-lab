@@ -144,9 +144,66 @@ docker compose ps
 
 | URL | What |
 |---|---|
-| http://localhost:4444 | ContextForge Admin UI |
+| http://localhost:4444 | ContextForge Admin UI (password in compose) |
 | http://localhost:8081 | mitmweb traffic inspector (password in compose) |
 | http://localhost:3000 | Grafana (traces + logs) |
+
+## Configuration
+
+Once services are online, you'll need to login to the ContextForge Admin UI and create the configuration needed.
+
+1. Create MCP Servers for postgres and filesystem connections:
+
+MCP Server Name: Database MCP
+MCP Server URL: http://mitmproxy:8090/mcp
+Transport Type: Streamable HTTP
+--
+MCP Server Name: Fileserver MCP
+MCP Server URL: http://mitmproxy:8080/mcp
+Transport Type: Streamable HTTP
+
+2. Create Virtual Server(s) to associate to the MCP connections:
+
+Name: Database-VS
+Tick Database MCP and select all Associated Tools
+Add Server
+
+Name: Fileserver-VS
+Tick Fileserver MCP and select all Associated Tools
+Add Server
+
+(Take note of the 'server ID's [UUID])
+
+3. Create API Token for admin user
+
+API Tokens > set Token Name > Create Token
+
+(record token details as they are needed for auth in the next step)
+
+4. Modify your Claude Desktop 'claude_desktop_config.json' file to include the created MCP connections like the below example:
+
+```bash
+    }
+  },
+ "mcpServers": {
+    "Database-VS": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "http://localhost:8000/servers/<Database-VS UUID Number>/mcp",
+        "--allow-http",
+        "--header", "Authorization: Bearer <ADMIN API TOKEN HERE>"]
+    },
+    "FileServer-VS": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "http://localhost:8000/servers/<Fileserver-VS UUID Number>/mcp",
+        "--allow-http",
+        "--header", "Authorization: Bearer <ADMIN API TOKEN HERE>"]
+    }
+  }
+```
 
 Point Claude Desktop at the gateway through mitmproxy, then try a tool call and watch it appear simultaneously in mitmweb (two flows) and Grafana (a span).
 
