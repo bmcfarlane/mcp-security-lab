@@ -133,10 +133,10 @@ actually depend on.
 
 ```bash
 
-# 2. Bring up the stack
+# 1. Bring up the stack
 docker compose up -d
 
-# 3. Watch it come up
+# 2. Watch it come up
 docker compose ps
 ```
 
