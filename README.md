@@ -224,7 +224,7 @@ API Tokens > set Token Name > Create Token
   }
 ```
 
-Point Claude Desktop at the gateway through mitmproxy, then try a tool call and watch it appear simultaneously in mitmweb (two flows) and Grafana (a span).
+At this point, Claude Desktop is connected to the gateway through mitmproxy; try a tool call and watch it appear simultaneously in mitmweb (two flows) and Grafana (a span).
 
 ### See the PII masking
 
