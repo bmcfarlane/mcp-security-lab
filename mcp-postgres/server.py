@@ -79,10 +79,10 @@ def find_customer(name_fragment: str) -> str:
     contacts, and a summary of their orders and open support tickets."""
     like = f"%{name_fragment}%"
     out = ["## Matching customers", _query(
-        "SELECT id, company_name, industry, city, province, account_tier, created_at, ssn "
+        "SELECT id, company_name, industry, city, province, account_tier, created_at "
         "FROM customers WHERE company_name ILIKE %s", (like,))]
     out += ["\n## Contacts", _query(
-        "SELECT c.full_name, c.title, c.email, c.phone, cu.company_name "
+        "SELECT c.full_name, c.title, c.email, c.phone, c.ssn, cu.company_name "
         "FROM contacts c JOIN customers cu ON cu.id = c.customer_id "
         "WHERE cu.company_name ILIKE %s", (like,))]
     out += ["\n## Orders", _query(
